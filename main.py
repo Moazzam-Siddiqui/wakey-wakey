@@ -37,23 +37,14 @@ def env_json(name: str) -> dict[str, str]:
         raise ValueError(f"{name} must be a valid JSON object") from exc
 
 
-def request_with_retry(
-    session: requests.Session,
-    method: str,
-    url: str,
-    **kwargs: Any,
-) -> requests.Response:
+def request_with_retry(session: requests.Session, method: str, url: str, **kwargs: Any) -> requests.Response:
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES):
         try:
-            response = session.request(
-                method, url, timeout=REQUEST_TIMEOUT, **kwargs
-            )
+            response = session.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
             if response.status_code not in (429, 500, 502, 503, 504):
                 return response
-            last_error = RuntimeError(
-                f"HTTP {response.status_code}: {response.text[:250]}"
-            )
+            last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:250]}")
         except requests.RequestException as exc:
             last_error = exc
         if attempt < MAX_RETRIES - 1:
@@ -71,8 +62,7 @@ def list_projects(session: requests.Session) -> list[dict[str, Any]]:
         )
         if response.status_code != 200:
             raise RuntimeError(
-                f"Could not list Supabase projects (HTTP {response.status_code}): "
-                f"{response.text[:500]}"
+                f"Could not list Supabase projects (HTTP {response.status_code}): {response.text[:500]}"
             )
         batch = response.json()
         if not isinstance(batch, list):
@@ -85,59 +75,35 @@ def list_projects(session: requests.Session) -> list[dict[str, Any]]:
 
 
 def get_status(project: dict[str, Any]) -> str:
-    return str(
-        project.get("status")
-        or project.get("status_type")
-        or project.get("health", "unknown")
-    ).lower()
+    return str(project.get("status") or "UNKNOWN").upper()
 
 
-def attempt_restore(
-    session: requests.Session, project_ref: str
-) -> tuple[str, str]:
-    # Supabase restore operation for an inactive/paused project.
+def attempt_restore(session: requests.Session, project_ref: str) -> tuple[str, str]:
     response = request_with_retry(
-        session,
-        "POST",
-        f"{API_BASE}/projects/{project_ref}/restore",
-        json={},
+        session, "POST", f"{API_BASE}/projects/{project_ref}/restore", json={}
     )
     if response.status_code in (200, 202, 204):
         return "requested", "restore request accepted"
-    return (
-        "failed",
-        f"restore API returned HTTP {response.status_code}: {response.text[:300]}",
-    )
+    return "failed", f"restore API returned HTTP {response.status_code}: {response.text[:300]}"
 
 
-def database_health_check(
-    project_ref: str,
-    password: str,
-    host: str,
-    port: int,
-) -> tuple[str, str]:
+def database_health_check(password: str, host: str, port: int) -> tuple[str, str]:
     try:
         import psycopg
         from psycopg.conninfo import make_conninfo
 
         conninfo = make_conninfo(
-            host=host,
-            port=port,
-            dbname="postgres",
-            user="postgres",
-            password=password,
-            connect_timeout=10,
-            sslmode="require",
+            host=host, port=port, dbname="postgres", user="postgres",
+            password=password, connect_timeout=10, sslmode="require",
             application_name="wakey-wakey",
         )
         with psycopg.connect(conninfo) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
-                row = cur.fetchone()
-                if row != (1,):
+                if cur.fetchone() != (1,):
                     return "failed", "unexpected result from SELECT 1"
         return "ok", "read-only SELECT 1 succeeded"
-    except Exception as exc:  # do not leak connection strings or credentials
+    except Exception as exc:
         return "failed", f"database check failed ({type(exc).__name__})"
 
 
@@ -147,8 +113,13 @@ def main() -> int:
         print("ERROR: missing SUPABASE_ACCESS_TOKEN secret", file=sys.stderr)
         return 2
 
-    passwords = env_json("SUPABASE_DB_PASSWORDS")
-    hosts = env_json("SUPABASE_DB_HOSTS")
+    try:
+        passwords = env_json("SUPABASE_DB_PASSWORDS")
+        hosts = env_json("SUPABASE_DB_HOSTS")
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
     port = int(os.getenv("SUPABASE_DB_PORT", "5432"))
     restore_enabled = os.getenv("RESTORE_INACTIVE_PROJECTS", "false").lower() == "true"
 
@@ -169,7 +140,8 @@ def main() -> int:
     results: list[ProjectResult] = []
 
     for project in projects:
-        ref = str(project.get("id") or project.get("ref") or "")
+        # Supabase list response contains both id and ref; ref is the project's URL/database identifier.
+        ref = str(project.get("ref") or project.get("id") or "")
         name = str(project.get("name") or ref or "unnamed")
         status = get_status(project)
         if not ref:
@@ -178,8 +150,7 @@ def main() -> int:
 
         result = ProjectResult(ref=ref, name=name, status=status)
 
-        inactive = any(word in status for word in ("inactive", "paused", "sleep"))
-        if inactive and restore_enabled:
+        if status == "INACTIVE" and restore_enabled:
             try:
                 result.restore, result.detail = attempt_restore(session, ref)
             except Exception as exc:
@@ -188,28 +159,22 @@ def main() -> int:
 
         password = passwords.get(ref)
         if password:
-            host = hosts.get(ref, f"db.{ref}.supabase.co")
-            result.database_check, detail = database_health_check(
-                ref, password, host, port
-            )
+            db = project.get("database") or {}
+            host = hosts.get(ref) or db.get("host") or f"db.{ref}.supabase.co"
+            result.database_check, detail = database_health_check(password, host, port)
             result.detail = "; ".join(filter(None, (result.detail, detail)))
         else:
             result.database_check = "not_configured"
 
         results.append(result)
-        print(
-            f"- {name} [{ref}]: status={result.status}, "
-            f"database={result.database_check}, restore={result.restore}"
-        )
+        print(f"- {name} [{ref}]: status={status}, database={result.database_check}, restore={result.restore}")
 
     summary = {
         "projects_discovered": len(projects),
         "projects_processed": len(results),
         "database_checks_ok": sum(r.database_check == "ok" for r in results),
         "database_checks_failed": sum(r.database_check == "failed" for r in results),
-        "database_checks_not_configured": sum(
-            r.database_check == "not_configured" for r in results
-        ),
+        "database_checks_not_configured": sum(r.database_check == "not_configured" for r in results),
         "restore_requests": sum(r.restore == "requested" for r in results),
         "projects": [r.__dict__ for r in results],
     }
@@ -224,13 +189,9 @@ def main() -> int:
             file.write(f"- Restore requests accepted: **{summary['restore_requests']}**\n\n")
             file.write("| Project | Status | DB check | Restore |\n|---|---|---|---|\n")
             for r in results:
-                safe_name = r.name.replace("|", "\\|")
-                file.write(
-                    f"| {safe_name} | {r.status} | {r.database_check} | {r.restore} |\n"
-                )
+                file.write(f"| {r.name.replace('|', '\\|')} | {r.status} | {r.database_check} | {r.restore} |\n")
 
     print(json.dumps({k: v for k, v in summary.items() if k != "projects"}, indent=2))
-    # A failed DB check is visible in the summary; don't hide project inventory success.
     return 0
 
 
