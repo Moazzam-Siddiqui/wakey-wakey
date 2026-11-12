@@ -1,6 +1,8 @@
 name: Wakey Wakey
 
 on:
+  push:
+    branches: [main]
   schedule:
     # Every 6 hours. GitHub may delay scheduled runs during high load.
     - cron: "17 */6 * * *"
