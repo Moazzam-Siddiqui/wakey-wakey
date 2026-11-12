@@ -17,12 +17,12 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 main.env_json("TEST_MAP")
 
-    def test_selected_project_refs_parses_comma_separated_values(self):
-        with patch.dict("os.environ", {"SUPABASE_PROJECT_REFS": "abc, def ,ghi"}, clear=False):
-            self.assertEqual(main.selected_project_refs(), {"abc", "def", "ghi"})
+    def test_excluded_project_refs_parses_comma_separated_values(self):
+        with patch.dict("os.environ", {"SUPABASE_EXCLUDED_PROJECT_REFS": "abc, def ,ghi"}, clear=False):
+            self.assertEqual(main.excluded_project_refs(), {"abc", "def", "ghi"})
 
-    def test_selected_project_refs_empty_means_all(self):
-        with patch.dict("os.environ", {"SUPABASE_PROJECT_REFS": ""}, clear=False):
+    def test_no_excluded_projects_by_default(self):
+        with patch.dict("os.environ", {"SUPABASE_EXCLUDED_PROJECT_REFS": ""}, clear=False):
             self.assertEqual(main.selected_project_refs(), set())
 
 class ProjectTests(unittest.TestCase):
