@@ -29,8 +29,8 @@ def env_json(name: str) -> dict[str, str]:
     except (json.JSONDecodeError, ValueError) as exc:
         raise ValueError(f"{name} must be a valid JSON object") from exc
 
-def selected_project_refs() -> set[str]:
-    raw = os.getenv("SUPABASE_PROJECT_REFS", "").strip()
+def excluded_project_refs() -> set[str]:
+    raw = os.getenv("SUPABASE_EXCLUDED_PROJECT_REFS", "").strip()
     return {item.strip() for item in raw.replace("\n", ",").split(",") if item.strip()}
 
 def request_with_retry(session: requests.Session, method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -93,7 +93,7 @@ def main() -> int:
     try:
         passwords = env_json("SUPABASE_DB_PASSWORDS")
         hosts = env_json("SUPABASE_DB_HOSTS")
-        port = int(os.getenv("SUPABASE_DB_PORT", "5432"))
+        port = int(os.getenv("SUPABASE_DB_PORT") or "5432")
     except (ValueError, TypeError) as exc:
         print(f"ERROR: invalid configuration: {exc}", file=sys.stderr)
         return 2
@@ -101,7 +101,7 @@ def main() -> int:
         print("ERROR: SUPABASE_DB_PORT must be between 1 and 65535", file=sys.stderr)
         return 2
 
-    allowed_refs = selected_project_refs()
+    excluded_refs = excluded_project_refs()
     restore_enabled = os.getenv("RESTORE_INACTIVE_PROJECTS", "false").strip().lower() == "true"
     session = requests.Session()
     session.headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json",
@@ -115,9 +115,9 @@ def main() -> int:
     selected = []
     for project in projects:
         ref = str(project.get("ref") or project.get("id") or "")
-        if not allowed_refs or ref in allowed_refs:
+        if ref and ref not in excluded_refs:
             selected.append(project)
-    print(f"Discovered {len(projects)} project(s); selected {len(selected)} for this run.")
+    print(f"Discovered {len(projects)} project(s); selected {len(selected)}; excluded {len(excluded_refs)}.")
     results: list[ProjectResult] = []
 
     for project in selected:
@@ -143,12 +143,11 @@ def main() -> int:
         results.append(result)
         print(f"- {name} [{ref}]: status={status}, database={result.database_check}, restore={result.restore}")
 
-    found_refs = {str(p.get("ref") or p.get("id") or "") for p in selected}
-    for ref in sorted(allowed_refs - found_refs):
-        print(f"WARNING: configured project ref was not found: {ref}")
+    for ref in sorted(excluded_refs):
+        print(f"- EXCLUDED: {ref} (left untouched)")
 
     summary = {
-        "projects_discovered": len(projects), "projects_selected": len(selected),
+        "projects_discovered": len(projects), "projects_selected": len(selected), "projects_excluded": len(excluded_refs),
         "projects_processed": len(results),
         "database_checks_ok": sum(r.database_check == "ok" for r in results),
         "database_checks_failed": sum(r.database_check == "failed" for r in results),
@@ -160,7 +159,7 @@ def main() -> int:
         with open(summary_path, "a", encoding="utf-8") as file:
             file.write("# Wakey Wakey ☀️\n\n")
             for key, label in [("projects_discovered", "Projects discovered"), ("projects_selected", "Projects selected"),
-                ("database_checks_ok", "Database checks successful"), ("database_checks_failed", "Database checks failed"),
+                ("projects_excluded", "Projects excluded"), ("database_checks_ok", "Database checks successful"), ("database_checks_failed", "Database checks failed"),
                 ("restore_requests", "Restore requests accepted")]:
                 file.write(f"- {label}: **{summary[key]}**\n")
             file.write("\n| Project | Status | DB check | Restore |\n|---|---|---|---|\n")
