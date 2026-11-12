@@ -1,83 +1,164 @@
 # Wakey Wakey ☀️
 
-A small GitHub Actions project that inventories all Supabase projects visible to your Personal Access Token, runs optional read-only database health checks, and can request restoration for paused projects.
+**Help your Supabase projects stay awake — automatically.**
 
-## What it does
+Wakey Wakey is a free, open-source helper. It runs on GitHub Actions, checks the Supabase projects you choose, and can:
 
-- Runs every 6 hours (UTC), plus manual dispatch.
-- Discovers projects through the Supabase Management API.
-- Checks project state.
-- Optionally attempts to restore projects reported as `INACTIVE`.
-- Executes read-only `SELECT 1` checks for projects whose database credentials are configured.
-- Writes a GitHub Actions job summary.
+- Check whether a project is active or paused.
+- Ask Supabase to restore a selected project when it is inactive.
+- Run a tiny, read-only database query (SELECT 1) when you add its database password.
+- Show a report after every run.
 
-> **Important:** Supabase's inactivity pausing is based on user database activity over a rolling 7-day period. Supabase says a few user requests each day is typically sufficient, but does not guarantee a project will never be paused. See [Project Pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
->
-> A GitHub run every six hours is a monitoring cadence, not a guarantee that every request counts as qualifying user activity. This tool does not bypass Supabase limits or policies.
+It runs every **6 hours**. Your computer can be off.
 
-## Setup
+> **Important:** This is a best-effort helper, not a promise that Supabase will never pause a project. Supabase controls its own pausing rules. A restore request can take time, and an accepted request does not mean the project is ready immediately.
 
-### 1. Create a Supabase Personal Access Token
+---
 
-Create a scoped PAT in Supabase account settings. Grant the projects-read permission for inventory. If you intend to enable restoration, grant the required project-management permission as well. Prefer a scoped token with the least privilege.
+## 🚀 Set it up — step by step
 
-Add it in GitHub:
+You need a GitHub account and a Supabase account.
 
-**Settings → Secrets and variables → Actions → New repository secret**
+### 1. Make your own copy
 
-- Name: `SUPABASE_ACCESS_TOKEN`
-- Value: your PAT
+1. Open this repository.
+2. Click **Fork** near the top-right.
+3. Keep the suggested name or choose your own.
+4. Open your new copy.
 
-### 2. Configure database keep-alive checks
+A fork is your own copy. You can change it without changing the original project.
 
-Database queries need each project's database password. Add another GitHub repository secret:
+### 2. Make a Supabase access token
 
-- Name: `SUPABASE_DB_PASSWORDS`
-- Value: JSON object mapping project ref to password, for example:
-  `{"abcdefghijklmnopqrst":"your-db-password"}`
+1. Sign in to [Supabase](https://supabase.com/dashboard).
+2. Open your account settings.
+3. Find **Access Tokens**.
+4. Create a new Personal Access Token (PAT).
+5. Give it permission to read your project list. If you want automatic restore, also give it the project-management permission needed to restore projects.
+6. Copy the token.
 
-Optional:
+**Keep this token private.** It is like a password. Never put it in a code file or public message.
 
-- `SUPABASE_DB_HOSTS`: JSON map of project ref to database hostname. If absent, the hostname returned by Supabase's project list is used, with `db.<ref>.supabase.co` as fallback.
-- Repository variable `SUPABASE_DB_PORT`: defaults to `5432`.
+### 3. Give GitHub the token safely
 
-Use direct database connection hosts where supported. Direct database connectivity may require IPv6; if your runner cannot reach it, configure a supported session pooler hostname/port and the matching username format. This starter supports the default `postgres` user and common direct connections; pooler-specific usernames require adapting the configuration/code.
+1. Open your fork on GitHub.
+2. Click **Settings**.
+3. Open **Secrets and variables → Actions**.
+4. Under **Repository secrets**, click **New repository secret**.
+5. Name it: SUPABASE_ACCESS_TOKEN
+6. Paste your token as the value.
+7. Click **Add secret**.
 
-### 3. Optional restore
+A GitHub secret is a private value. GitHub hides it from normal logs.
 
-By default, restore attempts are disabled.
+### 4. Choose the projects
 
-Add repository variable:
+1. In Supabase, open a project.
+2. Find its **Reference ID** in Project Settings → General.
+3. Copy the Reference ID.
+4. In GitHub, open **Settings → Secrets and variables → Actions → Variables**.
+5. Click **New repository variable**.
+6. Name it: SUPABASE_PROJECT_REFS
+7. Paste the Reference IDs, separated by commas:
 
-- Name: `RESTORE_INACTIVE_PROJECTS`
-- Value: `true`
+your_first_project_ref,your_second_project_ref
 
-Only enable this after confirming the PAT has the necessary permissions. The Management API restore endpoint can accept restoration requests, but a successful request does not mean the database is immediately ready. The next scheduled health checks will report readiness.
+Only projects in this list will be checked or restored. If you leave this variable empty, all projects visible to your token will be selected.
 
-### 4. Enable Actions
+**This repository owner's current selection:** rhvsvrrzklquryzfeall,qxrszwipfvvhvfpbsabe. The Agentic Workflow project is intentionally excluded. When you fork this project, replace these refs with your own.
 
-Open the **Actions** tab and enable workflows if GitHub prompts you. Run **Wakey Wakey** manually once to verify the PAT and connectivity.
+### 5. Add database passwords (recommended)
 
-## Run locally
+This lets Wakey Wakey run the small database check.
 
-Python 3.11+:
+1. In Supabase, open a project.
+2. Go to **Project Settings → Database**.
+3. Find or reset its database password.
+4. In GitHub, open **Settings → Secrets and variables → Actions → Secrets**.
+5. Click **New repository secret**.
+6. Name it: SUPABASE_DB_PASSWORDS
+7. Set the value to a JSON object like this:
 
-```bash
-python -m pip install -r requirements.txt
-SUPABASE_ACCESS_TOKEN=your_pat python main.py
-```
+    {
+      "your_first_project_ref": "your_first_database_password",
+      "your_second_project_ref": "your_second_database_password"
+    }
 
-## Security
+Replace the example text with your real values. Do not copy the example literally.
 
-- No credentials are committed to source.
-- Database checks run only `SELECT 1`.
-- Secrets are never printed in logs.
-- The workflow has read-only repository permissions.
-- This repository is public, so never place PATs, database passwords, or service-role keys in files or commits.
+You may also add a secret named SUPABASE_DB_HOSTS if you need custom database hostnames. It uses the same JSON format and project refs as keys. If you do not add it, Wakey Wakey tries the hostname Supabase returns, then db.PROJECT_REF.supabase.co.
 
-## References
+The database check only runs SELECT 1. It does not change your tables or data.
 
-- [List all projects API](https://supabase.com/docs/reference/api/v1-list-all-projects)
-- [Management API authentication](https://supabase.com/docs/reference/api/introduction)
+### 6. Turn on GitHub Actions
+
+1. Open the **Actions** tab in your fork.
+2. If GitHub asks, click **I understand my workflows, go ahead and enable them**.
+3. Choose **Wakey Wakey**.
+4. Click **Run workflow** to test it.
+
+After that, GitHub runs it automatically every 6 hours. Your computer can stay off.
+
+---
+
+## 🧸 What do the results mean?
+
+| Result | Simple meaning |
+|---|---|
+| ACTIVE_HEALTHY | Supabase says the project is active. |
+| INACTIVE | Supabase says the project is paused/inactive. |
+| restore=requested | Wakey Wakey asked Supabase to restore it. Wait and check again. |
+| database=ok | The tiny database check worked. |
+| database=not_configured | No database password was added for this project. |
+| database=failed | The database check could not connect. Check the password and host. |
+
+To see the report, open **Actions → Wakey Wakey → latest run**. Click the job and open its **Summary**.
+
+## ⚙️ Settings
+
+| Name | Where to add it | What it does |
+|---|---|---|
+| SUPABASE_ACCESS_TOKEN | Secret | Lets the tool see your Supabase projects. Required. |
+| SUPABASE_PROJECT_REFS | Variable | Comma-separated project list. Empty means all projects. |
+| SUPABASE_DB_PASSWORDS | Secret | Passwords for read-only database checks. Optional. |
+| SUPABASE_DB_HOSTS | Secret | Custom database hosts. Optional. |
+| SUPABASE_DB_PORT | Variable | Database port. Defaults to 5432. |
+
+Automatic restore requests are enabled in this repository's workflow. To turn them off, edit .github/workflows/wakey-wakey.yml and change RESTORE_INACTIVE_PROJECTS: "true" to "false".
+
+## ❓ If something goes wrong
+
+- **No projects appear:** Check that SUPABASE_ACCESS_TOKEN is saved as a GitHub secret and can read your project list.
+- **Restore fails:** Check that your token has permission to restore projects. Read the error in the Actions log.
+- **Database says not configured:** Add the project's password to SUPABASE_DB_PASSWORDS.
+- **Database connection fails:** Check the password and host. Some networks need a Supabase session-pooler connection instead of a direct connection.
+- **Nothing runs automatically:** Make sure GitHub Actions is enabled. Scheduled runs can sometimes start late.
+
+## 🔒 Keep your account safe
+
+- Never commit access tokens, database passwords, or service-role keys.
+- Keep private values in GitHub Actions Secrets.
+- Database checks run only SELECT 1.
+- The workflow only needs read access to this GitHub repository.
+- If SUPABASE_PROJECT_REFS is set, only those projects are processed.
+
+## 🧑‍💻 Run it on your computer
+
+You need Python 3.11 or newer. Install the packages with:
+
+    python -m pip install -r requirements.txt
+
+Set the environment variables above before running:
+
+    python main.py
+
+## 📚 Official Supabase guides
+
+- [Access tokens](https://supabase.com/dashboard/account/tokens)
+- [List projects API](https://supabase.com/docs/reference/api/v1-list-all-projects)
 - [Restore a project API](https://supabase.com/docs/reference/api/v1-restore-a-project)
 - [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing)
+
+---
+
+Made to be simple. ☀️
