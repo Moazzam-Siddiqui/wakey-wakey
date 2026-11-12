@@ -29,7 +29,7 @@ jobs:
       - name: Check and wake selected Supabase projects
         env:
           SUPABASE_ACCESS_TOKEN: \${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REFS: \${{ vars.SUPABASE_PROJECT_REFS }}
+          SUPABASE_PROJECT_REFS: \${{ vars.SUPABASE_PROJECT_REFS || 'rhvsvrrzklquryzfeall,qxrszwipfvvhvfpbsabe' }}
           SUPABASE_DB_PASSWORDS: \${{ secrets.SUPABASE_DB_PASSWORDS }}
           SUPABASE_DB_HOSTS: \${{ secrets.SUPABASE_DB_HOSTS }}
           SUPABASE_DB_PORT: \${{ vars.SUPABASE_DB_PORT }}
