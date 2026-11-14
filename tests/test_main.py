@@ -23,7 +23,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_no_excluded_projects_by_default(self):
         with patch.dict("os.environ", {"SUPABASE_EXCLUDED_PROJECT_REFS": ""}, clear=False):
-            self.assertEqual(main.selected_project_refs(), set())
+            self.assertEqual(main.excluded_project_refs(), set())
 
 class ProjectTests(unittest.TestCase):
     def test_get_status_uses_status_field(self):
